@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/Card";
 import { Chip } from "@/components/ui/Chip";
 import { Button } from "@/components/ui/Button";
 import { DiaperModal } from "@/components/modals/DiaperModal";
+import { FeedingModal } from "@/components/modals/FeedingModal";
 import { supabase } from "@/lib/supabase/client";
 import { getMyFamilyId, listBabies } from "@/lib/data/family";
 import { listUpcomingOccurrences } from "@/lib/data/reminders";
@@ -21,6 +22,7 @@ export default function DashboardPage() {
   const [err, setErr] = useState<string | null>(null);
 
   const [openDiaper, setOpenDiaper] = useState(false);
+  const [openFeeding, setOpenFeeding] = useState(false);
 
   const selectedBaby = useMemo(
     () => babies.find((b) => b.id === babyId) ?? null,
@@ -57,12 +59,6 @@ export default function DashboardPage() {
   const lastDiaper = events.find(
     (e) => e.type === "diaper" && (!babyId || e.baby_id === babyId)
   );
-
-  async function quickFeeding() {
-    if (!familyId || !babyId) return;
-    await createFeeding(familyId, babyId, "formula", 90);
-    await load();
-  }
 
   return (
     <div className="space-y-4">
@@ -112,7 +108,9 @@ export default function DashboardPage() {
         <Card>
           <div className="text-xs font-semibold text-gray-500">Poslednja pelena</div>
           <div className="mt-2 text-lg font-extrabold">
-            {lastDiaper ? `${formatTime(lastDiaper.occurred_at)} • ${lastDiaper.diaper_kind ?? ""}` : "—"}
+            {lastDiaper
+              ? `${formatTime(lastDiaper.occurred_at)} • ${lastDiaper.diaper_kind ?? ""}`
+              : "—"}
           </div>
           <div className="mt-1 text-xs text-gray-500">
             {lastDiaper ? "Zabeleženo" : "Nema unosa još."}
@@ -123,7 +121,7 @@ export default function DashboardPage() {
       <Card>
         <div className="text-sm font-extrabold">Brze radnje</div>
         <div className="mt-3 grid grid-cols-2 gap-2">
-          <Button onClick={quickFeeding}>+ Hranjenje (90ml)</Button>
+          <Button onClick={() => setOpenFeeding(true)}>+ Hranjenje</Button>
 
           <Button variant="secondary" onClick={() => setOpenDiaper(true)}>
             + Pelena
@@ -137,7 +135,7 @@ export default function DashboardPage() {
           </Button>
         </div>
         <div className="mt-2 text-xs text-gray-500">
-          Hranjenje je i dalje “quick log” radi testiranja. Pelena sada ide kroz full modal.
+          Hranjenje i pelena sada idu kroz full modale. Sledeće ubacujemo Spavanje.
         </div>
       </Card>
 
@@ -181,6 +179,22 @@ export default function DashboardPage() {
         onSave={async ({ babyId: bId, kind, rash, cream, note }) => {
           if (!familyId || !bId) return;
           await createDiaper(familyId, bId, kind, { rash, cream, note });
+          await load();
+        }}
+      />
+
+      <FeedingModal
+        open={openFeeding}
+        onClose={() => setOpenFeeding(false)}
+        babies={babies}
+        initialBabyId={babyId}
+        onSave={async ({ babyId: bId, mode, occurredAt, amountMl, note, data }) => {
+          if (!familyId || !bId) return;
+          await createFeeding(familyId, bId, mode, amountMl, {
+            occurredAt,
+            note,
+            data,
+          });
           await load();
         }}
       />

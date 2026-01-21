@@ -25,17 +25,25 @@ export async function createFeeding(
   familyId: string,
   babyId: string,
   mode: "formula" | "breast" | "solid",
-  amountMl?: number
+  amountMl?: number,
+  opts?: {
+    occurredAt?: string; // ISO
+    note?: string;
+    data?: Record<string, any>;
+  }
 ) {
   const userId = await requireUserId();
 
   const { error } = await supabase.from("events").insert({
     family_id: familyId,
     baby_id: babyId,
-    created_by: userId, // ✅ bitno za RLS
+    created_by: userId,
     type: "feeding",
+    occurred_at: opts?.occurredAt ?? new Date().toISOString(),
     feeding_mode: mode,
     amount_ml: amountMl ?? null,
+    data: opts?.data ?? {},
+    note: opts?.note?.trim() || null,
   });
 
   if (error) throw error;
@@ -52,8 +60,9 @@ export async function createDiaper(
   const { error } = await supabase.from("events").insert({
     family_id: familyId,
     baby_id: babyId,
-    created_by: userId, // ✅ bitno za RLS
+    created_by: userId,
     type: "diaper",
+    occurred_at: new Date().toISOString(),
     diaper_kind: kind,
     data: {
       rash: !!extra?.rash,
