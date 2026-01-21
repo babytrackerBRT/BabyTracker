@@ -1,9 +1,14 @@
 import { supabase } from "@/lib/supabase/client";
 import type { EventRow } from "@/types/db";
 
-/**
- * Poslednji eventi (timeline / dashboard)
- */
+async function requireUserId(): Promise<string> {
+  const { data, error } = await supabase.auth.getUser();
+  if (error) throw error;
+  const uid = data.user?.id;
+  if (!uid) throw new Error("Niste prijavljeni. Molimo prijavite se ponovo.");
+  return uid;
+}
+
 export async function listRecentEvents(familyId: string, limit = 20): Promise<EventRow[]> {
   const { data, error } = await supabase
     .from("events")
@@ -16,18 +21,18 @@ export async function listRecentEvents(familyId: string, limit = 20): Promise<Ev
   return data ?? [];
 }
 
-/**
- * FEEDING
- */
 export async function createFeeding(
   familyId: string,
   babyId: string,
   mode: "formula" | "breast" | "solid",
   amountMl?: number
 ) {
+  const userId = await requireUserId();
+
   const { error } = await supabase.from("events").insert({
     family_id: familyId,
     baby_id: babyId,
+    created_by: userId, // ✅ bitno za RLS
     type: "feeding",
     feeding_mode: mode,
     amount_ml: amountMl ?? null,
@@ -36,24 +41,18 @@ export async function createFeeding(
   if (error) throw error;
 }
 
-/**
- * DIAPER
- * kind: wet | poop | mixed
- * extra: rash / cream / note
- */
 export async function createDiaper(
   familyId: string,
   babyId: string,
   kind: "wet" | "poop" | "mixed",
-  extra?: {
-    rash?: boolean;
-    cream?: boolean;
-    note?: string;
-  }
+  extra?: { rash?: boolean; cream?: boolean; note?: string }
 ) {
+  const userId = await requireUserId();
+
   const { error } = await supabase.from("events").insert({
     family_id: familyId,
     baby_id: babyId,
+    created_by: userId, // ✅ bitno za RLS
     type: "diaper",
     diaper_kind: kind,
     data: {
@@ -61,35 +60,6 @@ export async function createDiaper(
       cream: !!extra?.cream,
     },
     note: extra?.note?.trim() || null,
-  });
-
-  if (error) throw error;
-}
-
-/**
- * SLEEP (za kasnije)
- */
-export async function createSleepStart(
-  familyId: string,
-  babyId: string
-) {
-  const { error } = await supabase.from("events").insert({
-    family_id: familyId,
-    baby_id: babyId,
-    type: "sleep_start",
-  });
-
-  if (error) throw error;
-}
-
-export async function createSleepEnd(
-  familyId: string,
-  babyId: string
-) {
-  const { error } = await supabase.from("events").insert({
-    family_id: familyId,
-    baby_id: babyId,
-    type: "sleep_end",
   });
 
   if (error) throw error;
