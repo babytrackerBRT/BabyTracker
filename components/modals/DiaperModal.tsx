@@ -78,8 +78,8 @@ export function DiaperModal({
       />
 
       {/* sheet */}
-      <div className="absolute inset-x-0 bottom-0">
-        <div className="mx-auto max-w-md rounded-t-3xl bg-white p-4 shadow-2xl dark:bg-gray-950">
+      <div className="absolute inset-x-0 bottom-0 pb-24">
+        <div className="mx-auto max-w-md rounded-t-3xl bg-white p-4 shadow-2xl dark:bg-gray-950 max-h-[75vh] overflow-y-auto">
           <div className="flex items-center justify-between">
             <div className="text-base font-extrabold">Pelena</div>
             <button
