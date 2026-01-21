@@ -6,10 +6,12 @@ import { Chip } from "@/components/ui/Chip";
 import { Button } from "@/components/ui/Button";
 import { DiaperModal } from "@/components/modals/DiaperModal";
 import { FeedingModal } from "@/components/modals/FeedingModal";
+import { SleepModal } from "@/components/modals/SleepModal";
 import { supabase } from "@/lib/supabase/client";
 import { getMyFamilyId, listBabies } from "@/lib/data/family";
 import { listUpcomingOccurrences } from "@/lib/data/reminders";
 import { listRecentEvents, createFeeding, createDiaper } from "@/lib/data/events";
+import { getActiveSleepSession, startSleepSession, stopSleepSession } from "@/lib/data/sleep";
 import type { Baby, EventRow, ReminderOccurrence } from "@/types/db";
 import { formatTime } from "@/lib/utils";
 
@@ -23,6 +25,7 @@ export default function DashboardPage() {
 
   const [openDiaper, setOpenDiaper] = useState(false);
   const [openFeeding, setOpenFeeding] = useState(false);
+  const [openSleep, setOpenSleep] = useState(false);
 
   const selectedBaby = useMemo(
     () => babies.find((b) => b.id === babyId) ?? null,
@@ -127,15 +130,20 @@ export default function DashboardPage() {
             + Pelena
           </Button>
 
-          <Button variant="secondary" onClick={() => window.location.assign("/podsetnici")}>
-            Podsetnici
+          <Button variant="secondary" onClick={() => setOpenSleep(true)}>
+            Spavanje
           </Button>
+
           <Button variant="ghost" onClick={() => window.location.assign("/podesavanja")}>
             Podešavanja
           </Button>
+
+          <Button variant="secondary" onClick={() => window.location.assign("/podsetnici")}>
+            Podsetnici
+          </Button>
         </div>
         <div className="mt-2 text-xs text-gray-500">
-          Hranjenje i pelena sada idu kroz full modale. Sledeće ubacujemo Spavanje.
+          Sledeći korak: auto podsetnici posle hranjenja + Android notifikacije.
         </div>
       </Card>
 
@@ -195,6 +203,22 @@ export default function DashboardPage() {
             note,
             data,
           });
+          await load();
+        }}
+      />
+
+      <SleepModal
+        open={openSleep}
+        onClose={() => setOpenSleep(false)}
+        babies={babies}
+        initialBabyId={babyId}
+        getActiveSession={async (bId) => getActiveSleepSession(bId)}
+        startSleep={async (bId) => {
+          if (!familyId) return;
+          await startSleepSession(familyId, bId);
+        }}
+        stopSleep={async (sessionId, payload) => {
+          await stopSleepSession(sessionId, payload);
           await load();
         }}
       />
