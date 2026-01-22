@@ -20,7 +20,7 @@ const THEME_SCRIPT = `
     if (theme === "dark") root.classList.add("dark");
     else root.classList.remove("dark");
 
-    // safe-area padding (top + bottom) da ne upada pod sistemske barove
+    // safe-area padding (top + bottom)
     var body = document.body;
     if (body) {
       body.style.paddingTop = "env(safe-area-inset-top)";
@@ -33,6 +33,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="sr" suppressHydrationWarning>
       <head>
+        {/* ✅ Material Symbols (Rounded) */}
+        <link
+          rel="stylesheet"
+          href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,600,0,0"
+        />
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
       </head>
       <body suppressHydrationWarning>
