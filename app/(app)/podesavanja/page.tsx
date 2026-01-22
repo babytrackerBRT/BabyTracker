@@ -19,6 +19,14 @@ import { formatDate, randomToken } from "@/lib/utils";
 import { supabase } from "@/lib/supabase/client";
 import { testVibrateNotification } from "@/lib/native/testNotification";
 
+type ThemePref = "light" | "dark";
+
+function applyTheme(theme: ThemePref) {
+  const root = document.documentElement;
+  if (theme === "dark") root.classList.add("dark");
+  else root.classList.remove("dark");
+}
+
 export default function SettingsPage() {
   const [familyId, setFamilyId] = useState("");
   const [babies, setBabies] = useState<Baby[]>([]);
@@ -30,6 +38,8 @@ export default function SettingsPage() {
   const [members, setMembers] = useState<FamilyMember[]>([]);
   const [invites, setInvites] = useState<FamilyInvite[]>([]);
   const [inviteEmail, setInviteEmail] = useState("");
+
+  const [theme, setTheme] = useState<ThemePref>("light");
 
   const selectedBaby = useMemo(
     () => babies.find((b) => b.id === selected) ?? null,
@@ -63,6 +73,13 @@ export default function SettingsPage() {
   }
 
   useEffect(() => {
+    // theme init (default light)
+    try {
+      const saved = (localStorage.getItem("pogo_theme") as ThemePref) || "light";
+      setTheme(saved);
+      applyTheme(saved);
+    } catch {}
+
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -106,6 +123,15 @@ export default function SettingsPage() {
     alert("Zakazano za 10 sekundi ✅");
   }
 
+  function toggleTheme() {
+    const next: ThemePref = theme === "dark" ? "light" : "dark";
+    setTheme(next);
+    try {
+      localStorage.setItem("pogo_theme", next);
+    } catch {}
+    applyTheme(next);
+  }
+
   return (
     <div className="space-y-4">
       <div>
@@ -114,6 +140,16 @@ export default function SettingsPage() {
       </div>
 
       {err && <Card className="border-red-200 bg-red-50 text-red-700">{err}</Card>}
+
+      <Card className="space-y-3">
+        <div className="text-sm font-extrabold">Izgled</div>
+        <div className="text-sm text-gray-600">
+          Za sada držimo Light kao default dok ne sredimo dark mode da izgleda kako treba.
+        </div>
+        <Button variant="secondary" onClick={toggleTheme} className="w-full">
+          Dark mode: {theme === "dark" ? "Uključen" : "Isključen"}
+        </Button>
+      </Card>
 
       <Card className="space-y-3">
         <div className="text-sm font-extrabold">Porodica i bebe</div>
@@ -190,8 +226,7 @@ export default function SettingsPage() {
                 Pošalji pozivnicu
               </Button>
               <div className="text-xs text-gray-500">
-                Za MVP, link se prikazuje kao alert (možeš da ga pošalješ ručno). Kasnije ubacujemo
-                slanje emaila.
+                Za MVP, link se prikazuje kao alert. Kasnije ubacujemo slanje emaila.
               </div>
             </div>
           </div>
