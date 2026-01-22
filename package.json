@@ -5,6 +5,9 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "cap:build": "set CAP_BUILD=1&& next build",
+    "cap:export": "set CAP_BUILD=1&& next build",
+    "cap:sync": "npx cap sync android",
     "start": "next start",
     "lint": "next lint"
   },
