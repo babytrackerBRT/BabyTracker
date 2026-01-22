@@ -1,11 +1,11 @@
-function isNativeCapacitor(): boolean {
-  const w = globalThis as any;
-  return !!w?.Capacitor?.isNativePlatform;
+import { Capacitor } from "@capacitor/core";
+
+function isNative(): boolean {
+  return Capacitor.getPlatform() !== "web";
 }
 
 export async function testVibrateNotification() {
-  if (!isNativeCapacitor()) {
-    // na webu samo informacija, bez crash-a
+  if (!isNative()) {
     alert("Ovaj test radi samo u Android aplikaciji (Capacitor).");
     return;
   }

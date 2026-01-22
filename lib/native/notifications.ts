@@ -1,3 +1,4 @@
+import { Capacitor } from "@capacitor/core";
 import { supabase } from "@/lib/supabase/client";
 
 type OccurrenceRow = {
@@ -9,9 +10,8 @@ type OccurrenceRow = {
   baby_id: string | null;
 };
 
-function isNativeCapacitor(): boolean {
-  const w = globalThis as any;
-  return !!w?.Capacitor?.isNativePlatform;
+function isNative(): boolean {
+  return Capacitor.getPlatform() !== "web";
 }
 
 function hashToIntId(s: string): number {
@@ -21,13 +21,13 @@ function hashToIntId(s: string): number {
 }
 
 async function getLocalNotifications() {
-  // dynamic import – samo kad smo na native
+  // dynamic import – učitava se samo na native
   const mod = await import("@capacitor/local-notifications");
   return mod.LocalNotifications;
 }
 
 export async function initLocalNotifications() {
-  if (!isNativeCapacitor()) return;
+  if (!isNative()) return;
 
   const LocalNotifications = await getLocalNotifications();
 
@@ -48,7 +48,7 @@ export async function initLocalNotifications() {
 }
 
 export async function rescheduleNext24hReminders(params: { familyId: string }) {
-  if (!isNativeCapacitor()) return;
+  if (!isNative()) return;
 
   const LocalNotifications = await getLocalNotifications();
 
