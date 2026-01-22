@@ -1,7 +1,10 @@
 import { Suspense } from "react";
 import PozivnicaClient from "./PozivnicaClient";
 
-export const dynamic = "force-dynamic";
+// ✅ Kada gradimo za Android (CAP_BUILD=1) moramo biti statični (export mode).
+// ✅ Kada gradimo za Vercel SSR možemo biti dynamic (nije obavezno, ali je okej).
+export const dynamic =
+  process.env.CAP_BUILD === "1" ? "force-static" : "force-dynamic";
 
 export default function Page() {
   return (
