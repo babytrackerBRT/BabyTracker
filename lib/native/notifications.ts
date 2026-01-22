@@ -1,4 +1,3 @@
-import { Capacitor } from "@capacitor/core";
 import { supabase } from "@/lib/supabase/client";
 
 type OccurrenceRow = {
@@ -10,8 +9,18 @@ type OccurrenceRow = {
   baby_id: string | null;
 };
 
-function isNative(): boolean {
-  return Capacitor.getPlatform() !== "web";
+function isNativeCapacitor(): boolean {
+  const w = globalThis as any;
+  const cap = w?.Capacitor;
+  if (!cap) return false;
+
+  // Capacitor u webu obično postoji, ali platform je "web"
+  try {
+    const platform = typeof cap.getPlatform === "function" ? cap.getPlatform() : cap.platform;
+    return platform && platform !== "web";
+  } catch {
+    return false;
+  }
 }
 
 function hashToIntId(s: string): number {
@@ -21,13 +30,12 @@ function hashToIntId(s: string): number {
 }
 
 async function getLocalNotifications() {
-  // dynamic import – učitava se samo na native
   const mod = await import("@capacitor/local-notifications");
   return mod.LocalNotifications;
 }
 
 export async function initLocalNotifications() {
-  if (!isNative()) return;
+  if (!isNativeCapacitor()) return;
 
   const LocalNotifications = await getLocalNotifications();
 
@@ -47,10 +55,31 @@ export async function initLocalNotifications() {
   });
 }
 
-export async function rescheduleNext24hReminders(params: { familyId: string }) {
-  if (!isNative()) return;
+/**
+ * OVO je centralna funkcija:
+ * - pročita SVE "scheduled" reminder_occurrences u naredna 24h
+ * - zakazuje native notifikacije (vibracija bez zvuka)
+ *
+ * Poziva se posle:
+ * - dodavanja/izmena reminders
+ * - mark as done
+ * - auto feeding reminders
+ */
+export async function syncNativeNotificationsForFamily(familyId: string) {
+  if (!isNativeCapacitor()) return;
 
   const LocalNotifications = await getLocalNotifications();
+
+  // osiguraj permission + channel
+  await initLocalNotifications();
+
+  // obriši prethodno zakazane iz naše aplikacije
+  // (najjednostavnije i najstabilnije za MVP)
+  // Ako hoćeš kasnije "smart diff", uradićemo.
+  const pending = await LocalNotifications.getPending();
+  if (pending?.notifications?.length) {
+    await LocalNotifications.cancel({ notifications: pending.notifications.map((n: any) => ({ id: n.id })) });
+  }
 
   const now = new Date();
   const until = new Date(now.getTime() + 24 * 60 * 60 * 1000);
@@ -58,7 +87,7 @@ export async function rescheduleNext24hReminders(params: { familyId: string }) {
   const { data, error } = await supabase
     .from("reminder_occurrences")
     .select("id,title,scheduled_for,status,category,baby_id")
-    .eq("family_id", params.familyId)
+    .eq("family_id", familyId)
     .eq("status", "scheduled")
     .gte("scheduled_for", now.toISOString())
     .lte("scheduled_for", until.toISOString())
@@ -67,6 +96,7 @@ export async function rescheduleNext24hReminders(params: { familyId: string }) {
   if (error) throw error;
 
   const rows = (data ?? []) as OccurrenceRow[];
+  if (!rows.length) return;
 
   const notifications = rows.map((r) => ({
     id: hashToIntId(r.id),
@@ -75,8 +105,6 @@ export async function rescheduleNext24hReminders(params: { familyId: string }) {
     schedule: { at: new Date(r.scheduled_for) },
     channelId: "pogo_reminders",
   }));
-
-  if (!notifications.length) return;
 
   await LocalNotifications.schedule({ notifications });
 }
