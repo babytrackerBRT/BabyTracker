@@ -9,10 +9,10 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@capacitor/android": "^8.0.1",
-    "@capacitor/cli": "^8.0.1",
-    "@capacitor/core": "^8.0.1",
-    "@capacitor/local-notifications": "^8.0.0",
+    "@capacitor/android": "7.4.5",
+    "@capacitor/cli": "7.4.5",
+    "@capacitor/core": "7.4.5",
+    "@capacitor/local-notifications": "7.0.4",
     "@supabase/supabase-js": "^2.45.4",
     "clsx": "^2.1.1",
     "next": "14.2.5",

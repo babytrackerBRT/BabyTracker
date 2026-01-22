@@ -1,4 +1,3 @@
-import { LocalNotifications } from "@capacitor/local-notifications";
 import { supabase } from "@/lib/supabase/client";
 
 type OccurrenceRow = {
@@ -10,40 +9,48 @@ type OccurrenceRow = {
   baby_id: string | null;
 };
 
+function isNativeCapacitor(): boolean {
+  const w = globalThis as any;
+  return !!w?.Capacitor?.isNativePlatform;
+}
+
 function hashToIntId(s: string): number {
-  // stabilan 32-bit int (Capacitor traži broj)
   let h = 0;
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
-  // pozitivno
   return Math.abs(h) || 1;
 }
 
+async function getLocalNotifications() {
+  // dynamic import – samo kad smo na native
+  const mod = await import("@capacitor/local-notifications");
+  return mod.LocalNotifications;
+}
+
 export async function initLocalNotifications() {
-  // Permission
+  if (!isNativeCapacitor()) return;
+
+  const LocalNotifications = await getLocalNotifications();
+
   const perm = await LocalNotifications.checkPermissions();
   if (perm.display !== "granted") {
     const req = await LocalNotifications.requestPermissions();
-    if (req.display !== "granted") {
-      // user odbio – samo izađi tiho
-      return;
-    }
+    if (req.display !== "granted") return;
   }
 
-  // Channel: vibracija DA, zvuk NE
+  // vibracija DA, zvuk NE
   await LocalNotifications.createChannel({
     id: "pogo_reminders",
     name: "Pogo podsetnici",
-    importance: 4, // DEFAULT/HIGH - dovoljno da vibrira
-    sound: undefined, // bez zvuka
+    importance: 4,
+    sound: undefined,
     vibration: true,
   });
 }
 
 export async function rescheduleNext24hReminders(params: { familyId: string }) {
-  const { familyId } = params;
+  if (!isNativeCapacitor()) return;
 
-  // očisti prethodno zakazane (da nema dupliranja)
-  await LocalNotifications.cancel({ notifications: [] }).catch(() => {});
+  const LocalNotifications = await getLocalNotifications();
 
   const now = new Date();
   const until = new Date(now.getTime() + 24 * 60 * 60 * 1000);
@@ -51,7 +58,7 @@ export async function rescheduleNext24hReminders(params: { familyId: string }) {
   const { data, error } = await supabase
     .from("reminder_occurrences")
     .select("id,title,scheduled_for,status,category,baby_id")
-    .eq("family_id", familyId)
+    .eq("family_id", params.familyId)
     .eq("status", "scheduled")
     .gte("scheduled_for", now.toISOString())
     .lte("scheduled_for", until.toISOString())
@@ -64,7 +71,7 @@ export async function rescheduleNext24hReminders(params: { familyId: string }) {
   const notifications = rows.map((r) => ({
     id: hashToIntId(r.id),
     title: r.title,
-    body: r.baby_id ? `Podsetnik za bebu` : `Porodični podsetnik`,
+    body: r.baby_id ? "Podsetnik za bebu" : "Porodični podsetnik",
     schedule: { at: new Date(r.scheduled_for) },
     channelId: "pogo_reminders",
   }));
