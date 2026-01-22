@@ -8,6 +8,8 @@ import { getMyFamilyId, listBabies, updateBabyName, addBaby, listInvites, create
 import type { Baby, FamilyInvite, FamilyMember } from "@/types/db";
 import { formatDate, randomToken } from "@/lib/utils";
 import { supabase } from "@/lib/supabase/client";
+import { testVibrateNotification } from "@/lib/native/testNotification";
+
 
 export default function SettingsPage() {
   const [familyId, setFamilyId] = useState("");
@@ -73,7 +75,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="space-y-4">
+    < className="space-y-4">
       <div>
         <div className="text-xs font-semibold text-gray-500">Pogo Baby Log</div>
         <h1 className="text-2xl font-extrabold">Podešavanja</h1>
@@ -149,6 +151,22 @@ export default function SettingsPage() {
           </div>
         )) : <div className="text-sm text-gray-500">Nema pozivnica.</div>}
       </Card>
+
+          <Button
+  variant="secondary"
+  onClick={async () => {
+    await testVibrateNotification();
+    alert("Zakazano za 10 sekundi ✅");
+  }}
+>
+  Test notifikacije (vibracija)
+</Button>
+
+
+
+      
     </div>
+
+    
   );
 }
