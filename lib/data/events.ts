@@ -1,6 +1,7 @@
 import { supabase } from "@/lib/supabase/client";
 import type { EventRow } from "@/types/db";
 import { scheduleFeedingReminders } from "@/lib/data/feedingReminders";
+import { syncNativeNotificationsForFamily } from "@/lib/native/notifications";
 
 async function requireUserId(): Promise<string> {
   const { data, error } = await supabase.auth.getUser();
@@ -11,19 +12,17 @@ async function requireUserId(): Promise<string> {
 }
 
 function calcRecommendedIntervalMinutes(birthDate: string | null): number {
-  // default ako nema birth_date
   if (!birthDate) return 180;
-
   const dob = new Date(birthDate);
   const now = new Date();
   const diffMs = now.getTime() - dob.getTime();
-  const months = diffMs / (1000 * 60 * 60 * 24 * 30.44); // approx
+  const months = diffMs / (1000 * 60 * 60 * 24 * 30.44);
 
-  if (months < 2) return 180;      // 0–2m: 3h
-  if (months < 4) return 210;      // 2–4m: 3.5h
-  if (months < 6) return 240;      // 4–6m: 4h
-  if (months < 9) return 270;      // 6–9m: 4.5h
-  return 300;                      // 9–12m+: 5h
+  if (months < 2) return 180;
+  if (months < 4) return 210;
+  if (months < 6) return 240;
+  if (months < 9) return 270;
+  return 300;
 }
 
 async function getFeedingIntervalMinutesForBaby(babyId: string): Promise<number> {
@@ -39,7 +38,6 @@ async function getFeedingIntervalMinutesForBaby(babyId: string): Promise<number>
     return calcRecommendedIntervalMinutes(data.birth_date ?? null);
   }
 
-  // custom
   const custom = Number(data.feeding_interval_minutes);
   if (Number.isFinite(custom) && custom > 0) return custom;
 
@@ -94,6 +92,9 @@ export async function createFeeding(
     occurredAt,
     intervalMinutes,
   });
+
+  // ✅ ODMAH sync native notifikacija (za sve reminders)
+  await syncNativeNotificationsForFamily(familyId);
 }
 
 export async function createDiaper(
@@ -119,4 +120,6 @@ export async function createDiaper(
   });
 
   if (error) throw error;
+
+  // (Pelene trenutno ne generišu reminders, ali sync neće škoditi – no-op na webu)
 }
