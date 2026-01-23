@@ -4,10 +4,13 @@ import { syncRemindersToLocalNotifications } from "@/lib/native/remindersSync";
 
 type ReminderCategory =
   | "doctor"
-  | "vitamin"
-  | "feeding"
+  | "meds"
+  | "vitamins"
+  | "care"
+  | "custom"
+  | "feeding_due"
   | "feeding_prep"
-  | "general";
+  | string;
 
 type OccurrenceStatus = "scheduled" | "done" | "cancelled";
 
@@ -60,6 +63,59 @@ export async function markOccurrenceDone(id: string) {
 }
 
 /**
+ * ✅ Snooze (odloži) – pomera scheduled_for za +minutes od SADA
+ */
+export async function snoozeOccurrence(id: string, minutes: number) {
+  const uid = await requireUserId();
+  const at = new Date(Date.now() + minutes * 60_000).toISOString();
+
+  const { error } = await supabase
+    .from("reminder_occurrences")
+    .update({
+      scheduled_for: at,
+      status: "scheduled" as OccurrenceStatus,
+      // optional audit
+      // updated_by: uid,
+    })
+    .eq("id", id);
+
+  if (error) throw error;
+  void uid;
+}
+
+/**
+ * ✅ Ručno izmeni vreme (datetime picker)
+ */
+export async function rescheduleOccurrence(id: string, newScheduledForIso: string) {
+  const uid = await requireUserId();
+
+  const { error } = await supabase
+    .from("reminder_occurrences")
+    .update({
+      scheduled_for: newScheduledForIso,
+      status: "scheduled" as OccurrenceStatus,
+    })
+    .eq("id", id);
+
+  if (error) throw error;
+  void uid;
+}
+
+/**
+ * ✅ Otkaži reminder (ne brišemo — ostaje trag u istoriji)
+ */
+export async function cancelOccurrence(id: string) {
+  const uid = await requireUserId();
+
+  const { error } = await supabase
+    .from("reminder_occurrences")
+    .update({ status: "cancelled" as OccurrenceStatus, done_at: new Date().toISOString(), done_by: uid })
+    .eq("id", id);
+
+  if (error) throw error;
+}
+
+/**
  * Jednokratni reminder (npr. doktor)
  */
 export async function createOneOffReminder(
@@ -67,7 +123,7 @@ export async function createOneOffReminder(
   babyId: string | null,
   title: string,
   whenIso: string,
-  category: ReminderCategory = "general"
+  category: ReminderCategory = "custom"
 ) {
   const uid = await requireUserId();
 
@@ -86,8 +142,7 @@ export async function createOneOffReminder(
 }
 
 /**
- * Daily vitamin: napravi definiciju + occurrences za narednih N dana.
- * (pošto si ti ovo već koristio u /podsetnici page)
+ * Daily vitamins: definicija + occurrences
  */
 export async function createDailyVitaminDefinitionAndOccurrences(
   familyId: string,
@@ -101,14 +156,13 @@ export async function createDailyVitaminDefinitionAndOccurrences(
   const [hh, mm] = timeHHmm.split(":").map((x) => parseInt(x, 10));
   const now = new Date();
 
-  // definicija (optional)
   const { data: def, error: defErr } = await supabase
     .from("reminder_definitions")
     .insert({
       family_id: familyId,
       baby_id: babyId,
       title: title.trim(),
-      category: "vitamin",
+      category: "vitamins",
       created_by: uid,
       data: { time: timeHHmm },
     })
@@ -124,7 +178,7 @@ export async function createDailyVitaminDefinitionAndOccurrences(
       baby_id: babyId,
       definition_id: def?.id ?? null,
       title: title.trim(),
-      category: "vitamin",
+      category: "vitamins",
       scheduled_for: d.toISOString(),
       status: "scheduled" as OccurrenceStatus,
       created_by: uid,
@@ -137,13 +191,7 @@ export async function createDailyVitaminDefinitionAndOccurrences(
 }
 
 /**
- * ✅ Core: posle hranjenja kreiramo:
- * - feeding_prep: interval-15min
- * - feeding: interval
- *
- * Interval uzimamo iz babies:
- * - use_recommended_interval = true -> preporuka po uzrastu
- * - false -> feeding_interval_minutes (custom)
+ * ✅ Feeding reminders: prep + due prema podešavanju bebe
  */
 export async function createFeedingPrepAndDueReminders(
   familyId: string,
@@ -152,7 +200,6 @@ export async function createFeedingPrepAndDueReminders(
 ) {
   const uid = await requireUserId();
 
-  // fetch baby config
   const { data: baby, error: babyErr } = await supabase
     .from("babies")
     .select("id,birth_date,use_recommended_interval,feeding_interval_minutes")
@@ -161,20 +208,23 @@ export async function createFeedingPrepAndDueReminders(
 
   if (babyErr) throw babyErr;
 
-  const useRec = baby?.use_recommended_interval !== false;
-  const custom = typeof baby?.feeding_interval_minutes === "number" ? baby.feeding_interval_minutes : null;
+  const useRec = (baby as any)?.use_recommended_interval !== false;
+  const custom = typeof (baby as any)?.feeding_interval_minutes === "number"
+    ? (baby as any).feeding_interval_minutes
+    : null;
 
-  const intervalMin = useRec ? recommendedIntervalMinutes(baby?.birth_date ?? null) : (custom ?? 165);
+  const intervalMin = useRec ? recommendedIntervalMinutes((baby as any)?.birth_date ?? null) : (custom ?? 165);
   const prepMin = Math.max(0, intervalMin - 15);
 
-  // clear future scheduled feeding reminders for this baby
   const nowIso = new Date().toISOString();
+
+  // obriši buduće feeding reminders za ovu bebu (da ne duplira)
   await supabase
     .from("reminder_occurrences")
     .delete()
     .eq("family_id", familyId)
     .eq("baby_id", babyId)
-    .in("category", ["feeding", "feeding_prep"])
+    .in("category", ["feeding_due", "feeding_prep"])
     .eq("status", "scheduled")
     .gte("scheduled_for", nowIso);
 
@@ -208,7 +258,7 @@ export async function createFeedingPrepAndDueReminders(
       family_id: familyId,
       baby_id: babyId,
       title: "Sledeće hranjenje",
-      category: "feeding",
+      category: "feeding_due",
       scheduled_for: dueAt,
       status: "scheduled" as OccurrenceStatus,
       created_by: uid,
@@ -226,7 +276,6 @@ export async function createFeedingPrepAndDueReminders(
 
 /**
  * ✅ Native sync: uzmi occurrences za narednih 24h i zakaži notifikacije.
- * (web = no-op)
  */
 export async function syncNativeNotificationsForFamily(familyId: string) {
   const now = new Date();
@@ -243,11 +292,11 @@ export async function syncNativeNotificationsForFamily(familyId: string) {
 
   if (error) throw error;
 
-  const reminders = (data ?? []).map((r) => ({
-    id: r.id,
-    title: r.title,
-    category: r.category,
-    scheduled_for: r.scheduled_for,
+  const reminders = (data ?? []).map((r: any) => ({
+    id: r.id as string,
+    title: r.title as string,
+    category: r.category as string,
+    scheduled_for: r.scheduled_for as string,
   }));
 
   await syncRemindersToLocalNotifications(reminders);
