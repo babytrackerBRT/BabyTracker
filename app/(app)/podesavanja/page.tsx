@@ -424,9 +424,7 @@ export default function SettingsPage() {
         <div className="text-sm text-gray-600">
           Testiraj lokalnu notifikaciju (vibracija bez zvuka) na Android telefonu.
         </div>
-        <Button variant="secondary" onClick={testNotif} className="w-full">
-          Test notifikacije (vibracija)
-        </Button>
+        
       </Card>
 
       <Card className="space-y-2">
