@@ -1,10 +1,6 @@
 import { supabase } from "@/lib/supabase/client";
 import type { EventRow } from "@/types/db";
-
-import {
-  createNextFeedingReminder,
-  syncNativeNotificationsForFamily,
-} from "@/lib/data/reminders";
+import { createFeedingPrepAndDueReminders, syncNativeNotificationsForFamily } from "@/lib/data/reminders";
 
 async function requireUserId(): Promise<string> {
   const { data, error } = await supabase.auth.getUser();
@@ -26,11 +22,21 @@ export async function listRecentEvents(familyId: string, limit = 20): Promise<Ev
   return data ?? [];
 }
 
+export async function deleteEvent(eventId: string) {
+  const { error } = await supabase.from("events").delete().eq("id", eventId);
+  if (error) throw error;
+}
+
+export async function updateEvent(eventId: string, payload: Partial<EventRow>) {
+  const { error } = await supabase.from("events").update(payload).eq("id", eventId);
+  if (error) throw error;
+}
+
 /**
- * FEEDING
+ * FEEDING:
  * - upis eventa
- * - automatski kreira reminder occurrence za sledeće hranjenje (+2h45m)
- * - radi native sync notifikacija (Android Capacitor) za SVE reminders
+ * - automatski: feeding_prep + feeding reminders prema podešavanju bebe
+ * - sync local notifications (Android)
  */
 export async function createFeeding(
   familyId: string,
@@ -60,11 +66,10 @@ export async function createFeeding(
 
   if (error) throw error;
 
-  // ✅ 1) Kreiraj reminder za sledeće hranjenje (+2h45m)
-  // (koristi occurrence tabelu kao source of truth)
-  await createNextFeedingReminder(familyId, babyId, 165);
+  // ✅ Create prep+due reminders based on baby settings
+  await createFeedingPrepAndDueReminders(familyId, babyId, occurredAt);
 
-  // ✅ 2) Sync notifikacija za celu porodicu (za sve reminders)
+  // ✅ Native sync (next 24h)
   await syncNativeNotificationsForFamily(familyId);
 }
 
@@ -92,32 +97,6 @@ export async function createDiaper(
     },
     note: extra?.note?.trim() || null,
   });
-
-  if (error) throw error;
-
-}
-
-// deleteEvent
-
-  export async function deleteEvent(eventId: string) {
-  const { error } = await supabase
-    .from("events")
-    .delete()
-    .eq("id", eventId);
-
-  if (error) throw error;
-}
-
-// updateEvent
-
-export async function updateEvent(
-  eventId: string,
-  payload: Partial<EventRow>
-) {
-  const { error } = await supabase
-    .from("events")
-    .update(payload)
-    .eq("id", eventId);
 
   if (error) throw error;
 }
