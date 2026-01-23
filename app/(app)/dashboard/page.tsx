@@ -37,6 +37,14 @@ function minutesUntil(iso: string) {
   return Math.max(0, Math.round(ms / 60000));
 }
 
+function msToHhMm(ms: number) {
+  const totalMin = Math.max(0, Math.floor(ms / 60000));
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  if (h <= 0) return `${m} min`;
+  return `${h}h ${m}m`;
+}
+
 const AAP_LINK =
   "https://www.healthychildren.org/English/ages-stages/baby/feeding-nutrition/Pages/how-often-and-how-much-should-your-baby-eat.aspx";
 
@@ -52,6 +60,10 @@ export default function DashboardPage() {
   const [openDiaper, setOpenDiaper] = useState(false);
   const [openFeeding, setOpenFeeding] = useState(false);
   const [openSleep, setOpenSleep] = useState(false);
+
+  // sleep heads-up
+  const [activeSleep, setActiveSleep] = useState<{ id: string; started_at: string } | null>(null);
+  const [busySleep, setBusySleep] = useState(false);
 
   async function load() {
     try {
@@ -74,9 +86,24 @@ export default function DashboardPage() {
     }
   }
 
+  async function refreshSleep(bId: string) {
+    try {
+      const s = await getActiveSleepSession(bId);
+      setActiveSleep(s);
+    } catch {
+      setActiveSleep(null);
+    }
+  }
+
   useEffect(() => {
     load();
   }, []);
+
+  useEffect(() => {
+    if (!babyId) return;
+    refreshSleep(babyId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [babyId]);
 
   const activeBaby = useMemo(
     () => babies.find((b) => b.id === babyId) ?? null,
@@ -91,40 +118,27 @@ export default function DashboardPage() {
     (e) => e.type === "diaper" && (!babyId || e.baby_id === babyId)
   );
 
-  // interval (recommended/custom)
   const intervalMin = useMemo(() => {
     if (!activeBaby) return 165;
-
     const useRec = (activeBaby as any)?.use_recommended_interval !== false;
     const custom = (activeBaby as any)?.feeding_interval_minutes;
     if (!useRec && typeof custom === "number" && Number.isFinite(custom)) return custom;
-
     return recommendedIntervalMinutes(activeBaby.birth_date ?? null);
   }, [activeBaby]);
 
   const prepMin = Math.max(0, intervalMin - 15);
 
-  // ✅ categories that exist in your ReminderCategory union:
-  // feeding_due + feeding_prep (and older data might still say "feeding")
   const nextPrep = useMemo(() => {
     return reminders.find((r) => {
       const cat = String((r as any).category);
-      return (
-        r.status === "scheduled" &&
-        (cat === "feeding_prep") &&
-        (!babyId || r.baby_id === babyId)
-      );
+      return r.status === "scheduled" && cat === "feeding_prep" && (!babyId || r.baby_id === babyId);
     });
   }, [reminders, babyId]);
 
   const nextDue = useMemo(() => {
     return reminders.find((r) => {
       const cat = String((r as any).category);
-      return (
-        r.status === "scheduled" &&
-        (cat === "feeding_due" || cat === "feeding") &&
-        (!babyId || r.baby_id === babyId)
-      );
+      return r.status === "scheduled" && (cat === "feeding_due" || cat === "feeding") && (!babyId || r.baby_id === babyId);
     });
   }, [reminders, babyId]);
 
@@ -146,6 +160,26 @@ export default function DashboardPage() {
     return "—";
   }, [nextDue, lastFeeding, intervalMin]);
 
+  const sleepDuration = useMemo(() => {
+    if (!activeSleep?.started_at) return null;
+    return msToHhMm(Date.now() - new Date(activeSleep.started_at).getTime());
+  }, [activeSleep]);
+
+  async function quickStopSleep() {
+    if (!activeSleep?.id) return;
+    const ok = confirm("Završi spavanje?");
+    if (!ok) return;
+
+    try {
+      setBusySleep(true);
+      await stopSleepSession(activeSleep.id, { quality: "normal" });
+      await refreshSleep(babyId);
+      await load(); // da dnevnik/dash bude sveže
+    } finally {
+      setBusySleep(false);
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -163,14 +197,9 @@ export default function DashboardPage() {
             {b.name}
           </Chip>
         ))}
-        {!babies.length && (
-          <div className="text-sm text-gray-500">
-            Nema beba (trebalo bi automatski da postoji „Beba 1“).
-          </div>
-        )}
       </div>
 
-      {/* HEADS-UP */}
+      {/* FEEDING HEADS-UP */}
       <Card className="space-y-2">
         <div className="flex items-center justify-between">
           <div className="text-sm font-extrabold">Heads-up (hranjenje)</div>
@@ -205,10 +234,37 @@ export default function DashboardPage() {
             )}
           </div>
         </div>
+      </Card>
 
-        <div className="text-xs text-gray-500">
-          Ovo je informativno. Ako pedijatar preporuči drugačije, prati pedijatra.
+      {/* SLEEP HEADS-UP */}
+      <Card className="space-y-2">
+        <div className="flex items-center justify-between">
+          <div className="text-sm font-extrabold">Heads-up (spavanje)</div>
+          <button
+            className="text-sm font-semibold text-brand-700"
+            onClick={() => setOpenSleep(true)}
+            type="button"
+          >
+            Otvori
+          </button>
         </div>
+
+        {activeSleep ? (
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 px-3 py-2 text-sm dark:border-gray-800">
+            <div className="min-w-0">
+              <div className="font-semibold">Spava</div>
+              <div className="text-xs text-gray-500">
+                Počelo: {formatTime(activeSleep.started_at)} • Traje: {sleepDuration}
+              </div>
+            </div>
+
+            <Button onClick={quickStopSleep} disabled={busySleep}>
+              {busySleep ? "…" : "Završi"}
+            </Button>
+          </div>
+        ) : (
+          <div className="text-sm text-gray-600">Trenutno ne spava.</div>
+        )}
       </Card>
 
       <div className="grid grid-cols-2 gap-3">
@@ -252,43 +308,6 @@ export default function DashboardPage() {
             Podsetnici
           </Button>
         </div>
-
-        <div className="mt-2 text-xs text-gray-500">
-          Sledeći korak: reminders kartice (boje) + feeding modal heads-up.
-        </div>
-      </Card>
-
-      <Card>
-        <div className="flex items-center justify-between">
-          <div className="text-sm font-extrabold">Današnji podsetnici (preview)</div>
-          <button
-            className="text-sm font-semibold text-brand-700"
-            onClick={() => window.location.assign("/podsetnici")}
-          >
-            Otvori
-          </button>
-        </div>
-
-        <div className="mt-3 space-y-2">
-          {reminders.length ? (
-            reminders.slice(0, 6).map((r) => (
-              <div
-                key={r.id}
-                className="flex items-center justify-between rounded-xl border border-gray-200 px-3 py-2 text-sm dark:border-gray-800"
-              >
-                <div className="min-w-0">
-                  <div className="truncate font-semibold">{r.title}</div>
-                  <div className="text-xs text-gray-500">
-                    {formatTime(r.scheduled_for)} • {String((r as any).category)}
-                  </div>
-                </div>
-                <div className="text-xs font-semibold text-gray-500">{r.status}</div>
-              </div>
-            ))
-          ) : (
-            <div className="text-sm text-gray-500">Nema podsetnika unapred.</div>
-          )}
-        </div>
       </Card>
 
       <DiaperModal
@@ -324,9 +343,12 @@ export default function DashboardPage() {
         startSleep={async (bId) => {
           if (!familyId) return;
           await startSleepSession(familyId, bId);
+          await refreshSleep(bId);
+          await load();
         }}
         stopSleep={async (sessionId, payload) => {
           await stopSleepSession(sessionId, payload);
+          await refreshSleep(babyId);
           await load();
         }}
       />
