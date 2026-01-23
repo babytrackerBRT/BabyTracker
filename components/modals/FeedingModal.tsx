@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Chip } from "@/components/ui/Chip";
 import type { Baby } from "@/types/db";
+import { supabase } from "@/lib/supabase/client";
 
 type FeedingMode = "formula" | "breast" | "solid";
 
@@ -21,6 +22,29 @@ function toLocalDateTimeInputValue(d: Date) {
   const mi = pad2(d.getMinutes());
   return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
 }
+
+function daysBetween(aIso?: string | null, b = new Date()) {
+  if (!aIso) return null;
+  const a = new Date(aIso);
+  if (Number.isNaN(a.getTime())) return null;
+  return Math.floor((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+function recommendedIntervalMinutes(birthDateIso?: string | null): number {
+  const days = daysBetween(birthDateIso);
+  if (days == null) return 165;
+  if (days <= 30) return 150;
+  if (days <= 90) return 180;
+  if (days <= 180) return 210;
+  return 240;
+}
+
+function fmtTime(d: Date) {
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+const AAP_LINK =
+  "https://www.healthychildren.org/English/ages-stages/baby/feeding-nutrition/Pages/how-often-and-how-much-should-your-baby-eat.aspx";
 
 export function FeedingModal({
   open,
@@ -67,6 +91,10 @@ export function FeedingModal({
   const [busy, setBusy] = useState<boolean>(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // heads-up interval settings loaded from DB
+  const [intervalMin, setIntervalMin] = useState<number>(165);
+  const [intervalSource, setIntervalSource] = useState<"recommended" | "custom">("recommended");
+
   useEffect(() => {
     if (!open) return;
     setErr(null);
@@ -82,6 +110,39 @@ export function FeedingModal({
     setNote("");
     setMore(false);
   }, [open, initialBabyId, firstBabyId]);
+
+  // fetch baby interval config when modal opens / baby changes
+  useEffect(() => {
+    if (!open) return;
+    if (!babyId) return;
+
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from("babies")
+          .select("birth_date,use_recommended_interval,feeding_interval_minutes")
+          .eq("id", babyId)
+          .single();
+
+        if (error) throw error;
+
+        const useRec = (data as any)?.use_recommended_interval !== false;
+        const custom = (data as any)?.feeding_interval_minutes;
+
+        if (!useRec && typeof custom === "number" && Number.isFinite(custom)) {
+          setIntervalSource("custom");
+          setIntervalMin(custom);
+        } else {
+          setIntervalSource("recommended");
+          setIntervalMin(recommendedIntervalMinutes((data as any)?.birth_date ?? null));
+        }
+      } catch {
+        // fallback (ne rušimo modal)
+        setIntervalSource("recommended");
+        setIntervalMin(165);
+      }
+    })();
+  }, [open, babyId]);
 
   const canSave = useMemo(() => {
     if (!babyId || busy) return false;
@@ -99,6 +160,11 @@ export function FeedingModal({
   function applyDeltaMinutes(delta: number) {
     setWhen((prev) => new Date(prev.getTime() + delta * 60_000));
   }
+
+  const prepMin = Math.max(0, intervalMin - 15);
+
+  const prepAt = useMemo(() => new Date(when.getTime() + prepMin * 60_000), [when, prepMin]);
+  const dueAt = useMemo(() => new Date(when.getTime() + intervalMin * 60_000), [when, intervalMin]);
 
   async function handleSave() {
     if (!canSave) return;
@@ -163,12 +229,12 @@ export function FeedingModal({
 
       {/* sheet */}
       <div
-  className="absolute inset-x-0"
-  style={{
-    bottom: "calc(env(safe-area-inset-bottom) + 84px)", // 84px ~ tab bar
-  }}
->
-  <div className="mx-auto max-w-md rounded-t-3xl bg-white p-4 shadow-2xl dark:bg-gray-950 max-h-[70vh] overflow-y-auto">
+        className="absolute inset-x-0"
+        style={{
+          bottom: "calc(env(safe-area-inset-bottom) + 84px)", // 84px ~ tab bar
+        }}
+      >
+        <div className="mx-auto max-w-md rounded-t-3xl bg-white p-4 shadow-2xl dark:bg-gray-950 max-h-[70vh] overflow-y-auto">
           <div className="flex items-center justify-between">
             <div className="text-base font-extrabold">Hranjenje</div>
             <button
@@ -192,26 +258,57 @@ export function FeedingModal({
             </div>
           </div>
 
+          {/* 🔥 Heads-up */}
+          <Card className="mt-4 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="text-sm font-extrabold">Šta će biti zakazano</div>
+              {intervalSource === "recommended" && (
+                <a
+                  href={AAP_LINK}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-sm font-semibold text-brand-700"
+                >
+                  Prikaži više
+                </a>
+              )}
+            </div>
+
+            <div className="text-xs text-gray-500">
+              Interval: <span className="font-semibold">{intervalMin} min</span>{" "}
+              {intervalSource === "recommended" ? "(preporučeno)" : "(custom)"}
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="rounded-xl border border-gray-200 px-3 py-2 text-sm dark:border-gray-800">
+                <div className="text-xs font-semibold text-gray-500">Pripremi obrok</div>
+                <div className="mt-1 text-base font-extrabold">{fmtTime(prepAt)}</div>
+                <div className="text-[11px] text-gray-500">{prepMin} min posle</div>
+              </div>
+
+              <div className="rounded-xl border border-gray-200 px-3 py-2 text-sm dark:border-gray-800">
+                <div className="text-xs font-semibold text-gray-500">Sledeće hranjenje</div>
+                <div className="mt-1 text-base font-extrabold">{fmtTime(dueAt)}</div>
+                <div className="text-[11px] text-gray-500">{intervalMin} min posle</div>
+              </div>
+            </div>
+
+            <div className="text-[11px] text-gray-500">
+              Ovo je informativno. Ako pedijatar kaže drugačije, prati pedijatra.
+            </div>
+          </Card>
+
           {/* mode */}
           <div className="mt-4">
             <div className="text-xs font-semibold text-gray-500">Tip</div>
             <div className="mt-2 grid grid-cols-3 gap-2">
-              <Button
-                variant={mode === "formula" ? "primary" : "secondary"}
-                onClick={() => setMode("formula")}
-              >
+              <Button variant={mode === "formula" ? "primary" : "secondary"} onClick={() => setMode("formula")}>
                 Formula
               </Button>
-              <Button
-                variant={mode === "breast" ? "primary" : "secondary"}
-                onClick={() => setMode("breast")}
-              >
+              <Button variant={mode === "breast" ? "primary" : "secondary"} onClick={() => setMode("breast")}>
                 Dojenje
               </Button>
-              <Button
-                variant={mode === "solid" ? "primary" : "secondary"}
-                onClick={() => setMode("solid")}
-              >
+              <Button variant={mode === "solid" ? "primary" : "secondary"} onClick={() => setMode("solid")}>
                 Čvrsta
               </Button>
             </div>
@@ -259,7 +356,7 @@ export function FeedingModal({
                 {[60, 90, 120, 150, 180].map((v) => (
                   <Button
                     key={v}
-                    variant={(!customAmount.trim() && amount === v) ? "primary" : "secondary"}
+                    variant={!customAmount.trim() && amount === v ? "primary" : "secondary"}
                     onClick={() => {
                       setCustomAmount("");
                       setAmount(v);
@@ -293,22 +390,13 @@ export function FeedingModal({
                 <div>
                   <div className="text-sm font-semibold">Strana</div>
                   <div className="mt-2 grid grid-cols-3 gap-2">
-                    <Button
-                      variant={side === "left" ? "primary" : "secondary"}
-                      onClick={() => setSide("left")}
-                    >
+                    <Button variant={side === "left" ? "primary" : "secondary"} onClick={() => setSide("left")}>
                       Leva
                     </Button>
-                    <Button
-                      variant={side === "right" ? "primary" : "secondary"}
-                      onClick={() => setSide("right")}
-                    >
+                    <Button variant={side === "right" ? "primary" : "secondary"} onClick={() => setSide("right")}>
                       Desna
                     </Button>
-                    <Button
-                      variant={side === "both" ? "primary" : "secondary"}
-                      onClick={() => setSide("both")}
-                    >
+                    <Button variant={side === "both" ? "primary" : "secondary"} onClick={() => setSide("both")}>
                       Obe
                     </Button>
                   </div>
@@ -343,9 +431,7 @@ export function FeedingModal({
                   placeholder="npr. banana, kašica..."
                   className="mt-2 w-full rounded-2xl border border-gray-200 bg-white px-3 py-2 text-sm outline-none dark:border-gray-800 dark:bg-gray-950"
                 />
-                <div className="mt-1 text-[11px] text-gray-500">
-                  Dovoljno je kratko (npr. “banana” ili “kašica”).
-                </div>
+                <div className="mt-1 text-[11px] text-gray-500">Dovoljno je kratko (npr. “banana”).</div>
               </Card>
             </div>
           )}
