@@ -1,17 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Chip } from "@/components/ui/Chip";
 import { Button } from "@/components/ui/Button";
 import { DiaperModal } from "@/components/modals/DiaperModal";
 import { FeedingModal } from "@/components/modals/FeedingModal";
 import { SleepModal } from "@/components/modals/SleepModal";
+
 import { supabase } from "@/lib/supabase/client";
 import { getMyFamilyId, listBabies } from "@/lib/data/family";
 import { listUpcomingOccurrences } from "@/lib/data/reminders";
 import { listRecentEvents, createFeeding, createDiaper } from "@/lib/data/events";
 import { getActiveSleepSession, startSleepSession, stopSleepSession } from "@/lib/data/sleep";
+
 import type { Baby, EventRow, ReminderOccurrence } from "@/types/db";
 import { formatTime } from "@/lib/utils";
 
@@ -19,6 +21,7 @@ export default function DashboardPage() {
   const [familyId, setFamilyId] = useState<string>("");
   const [babies, setBabies] = useState<Baby[]>([]);
   const [babyId, setBabyId] = useState<string>("");
+
   const [events, setEvents] = useState<EventRow[]>([]);
   const [reminders, setReminders] = useState<ReminderOccurrence[]>([]);
   const [err, setErr] = useState<string | null>(null);
@@ -27,14 +30,10 @@ export default function DashboardPage() {
   const [openFeeding, setOpenFeeding] = useState(false);
   const [openSleep, setOpenSleep] = useState(false);
 
-  const selectedBaby = useMemo(
-    () => babies.find((b) => b.id === babyId) ?? null,
-    [babies, babyId]
-  );
-
   async function load() {
     try {
       setErr(null);
+
       const fid = await getMyFamilyId();
       setFamilyId(fid);
 
@@ -42,7 +41,7 @@ export default function DashboardPage() {
       setBabies(b);
       setBabyId((prev) => prev || b[0]?.id || "");
 
-      const ev = await listRecentEvents(fid, 20);
+      const ev = await listRecentEvents(fid, 30);
       setEvents(ev);
 
       const ro = await listUpcomingOccurrences(fid);
@@ -59,6 +58,7 @@ export default function DashboardPage() {
   const lastFeeding = events.find(
     (e) => e.type === "feeding" && (!babyId || e.baby_id === babyId)
   );
+
   const lastDiaper = events.find(
     (e) => e.type === "diaper" && (!babyId || e.baby_id === babyId)
   );
@@ -70,6 +70,7 @@ export default function DashboardPage() {
           <div className="text-xs font-semibold text-gray-500">Pogo Baby Log</div>
           <h1 className="text-2xl font-extrabold">Početna</h1>
         </div>
+
         <button
           className="rounded-full border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700 dark:border-gray-800 dark:text-gray-200"
           onClick={async () => {
@@ -123,6 +124,7 @@ export default function DashboardPage() {
 
       <Card>
         <div className="text-sm font-extrabold">Brze radnje</div>
+
         <div className="mt-3 grid grid-cols-2 gap-2">
           <Button onClick={() => setOpenFeeding(true)}>+ Hranjenje</Button>
 
@@ -134,16 +136,15 @@ export default function DashboardPage() {
             Spavanje
           </Button>
 
-          <Button variant="ghost" onClick={() => window.location.assign("/podesavanja")}>
-            Podešavanja
-          </Button>
+          {/* ✅ izbacio Podešavanja odavde */}
 
           <Button variant="secondary" onClick={() => window.location.assign("/podsetnici")}>
             Podsetnici
           </Button>
         </div>
+
         <div className="mt-2 text-xs text-gray-500">
-          Sledeći korak: auto podsetnici posle hranjenja + Android notifikacije.
+          Sledeći korak: Dnevnik (timeline) + edit/delete.
         </div>
       </Card>
 
@@ -157,6 +158,7 @@ export default function DashboardPage() {
             Otvori
           </button>
         </div>
+
         <div className="mt-3 space-y-2">
           {reminders.length ? (
             reminders.map((r) => (
@@ -198,11 +200,7 @@ export default function DashboardPage() {
         initialBabyId={babyId}
         onSave={async ({ babyId: bId, mode, occurredAt, amountMl, note, data }) => {
           if (!familyId || !bId) return;
-          await createFeeding(familyId, bId, mode, amountMl, {
-            occurredAt,
-            note,
-            data,
-          });
+          await createFeeding(familyId, bId, mode, amountMl, { occurredAt, note, data });
           await load();
         }}
       />
