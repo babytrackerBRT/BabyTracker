@@ -73,13 +73,11 @@ export default function SettingsPage() {
   }
 
   useEffect(() => {
-    // theme init (default light)
     try {
       const saved = (localStorage.getItem("pogo_theme") as ThemePref) || "light";
       setTheme(saved);
       applyTheme(saved);
     } catch {}
-
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -132,6 +130,14 @@ export default function SettingsPage() {
     applyTheme(next);
   }
 
+  async function logout() {
+    const ok = confirm("Da li želite da se odjavite?");
+    if (!ok) return;
+
+    await supabase.auth.signOut();
+    // posle signOut-a app će sama prebaciti na login preko auth guard-a
+  }
+
   return (
     <div className="space-y-4">
       <div>
@@ -144,7 +150,7 @@ export default function SettingsPage() {
       <Card className="space-y-3">
         <div className="text-sm font-extrabold">Izgled</div>
         <div className="text-sm text-gray-600">
-          Za sada držimo Light kao default dok ne sredimo dark mode da izgleda kako treba.
+          Za sada držimo Light kao default dok ne sredimo dark mode.
         </div>
         <Button variant="secondary" onClick={toggleTheme} className="w-full">
           Dark mode: {theme === "dark" ? "Uključen" : "Isključen"}
@@ -261,6 +267,21 @@ export default function SettingsPage() {
         <Button variant="secondary" onClick={testNotif} className="w-full">
           Test notifikacije (vibracija)
         </Button>
+      </Card>
+
+      {/* ✅ Odjava na dnu, crveno + confirm */}
+      <Card className="space-y-2">
+        <div className="text-sm font-extrabold">Nalog</div>
+        <Button
+          onClick={logout}
+          className="w-full"
+          variant="secondary"
+        >
+          <span className="text-red-600 font-extrabold">Odjava</span>
+        </Button>
+        <div className="text-xs text-gray-500">
+          Da ne klikneš slučajno, traži se potvrda.
+        </div>
       </Card>
     </div>
   );
