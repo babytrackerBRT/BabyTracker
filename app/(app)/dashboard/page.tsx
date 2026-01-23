@@ -8,7 +8,6 @@ import { DiaperModal } from "@/components/modals/DiaperModal";
 import { FeedingModal } from "@/components/modals/FeedingModal";
 import { SleepModal } from "@/components/modals/SleepModal";
 
-import { supabase } from "@/lib/supabase/client";
 import { getMyFamilyId, listBabies } from "@/lib/data/family";
 import { listUpcomingOccurrences } from "@/lib/data/reminders";
 import { listRecentEvents, createFeeding, createDiaper } from "@/lib/data/events";
@@ -71,14 +70,7 @@ export default function DashboardPage() {
           <h1 className="text-2xl font-extrabold">Početna</h1>
         </div>
 
-        <button
-          className="rounded-full border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700 dark:border-gray-800 dark:text-gray-200"
-          onClick={async () => {
-            await supabase.auth.signOut();
-          }}
-        >
-          Odjava
-        </button>
+        {/* ✅ Odjava je prebačena u Podešavanja */}
       </div>
 
       {err && <Card className="border-red-200 bg-red-50 text-red-700">{err}</Card>}
@@ -127,17 +119,12 @@ export default function DashboardPage() {
 
         <div className="mt-3 grid grid-cols-2 gap-2">
           <Button onClick={() => setOpenFeeding(true)}>+ Hranjenje</Button>
-
           <Button variant="secondary" onClick={() => setOpenDiaper(true)}>
             + Pelena
           </Button>
-
           <Button variant="secondary" onClick={() => setOpenSleep(true)}>
             Spavanje
           </Button>
-
-          {/* ✅ izbacio Podešavanja odavde */}
-
           <Button variant="secondary" onClick={() => window.location.assign("/podsetnici")}>
             Podsetnici
           </Button>
