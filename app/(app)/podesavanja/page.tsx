@@ -419,23 +419,6 @@ export default function SettingsPage() {
         )}
       </Card>
 
-      <Card className="space-y-2">
-        <div className="text-sm font-extrabold">Notifikacije</div>
-        <div className="text-sm text-gray-600">
-          Testiraj lokalnu notifikaciju (vibracija bez zvuka) na Android telefonu.
-        </div>
-        <Button variant="secondary" onClick={testNotif} className="w-full">
-          Test notifikacije (vibracija)
-        </Button>
-      </Card>
-
-      <Card className="space-y-2">
-        <div className="text-sm font-extrabold">Nalog</div>
-        <Button onClick={logout} className="w-full" variant="secondary">
-          <span className="text-red-600 font-extrabold">Odjava</span>
-        </Button>
-        <div className="text-xs text-gray-500">Da ne klikneš slučajno, traži se potvrda.</div>
-      </Card>
     </div>
   );
 }
