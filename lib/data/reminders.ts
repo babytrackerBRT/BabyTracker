@@ -1,168 +1,254 @@
-// lib/data/reminders.ts
-"use client";
-
 import { supabase } from "@/lib/supabase/client";
 import type { ReminderOccurrence } from "@/types/db";
+import { syncRemindersToLocalNotifications } from "@/lib/native/remindersSync";
 
-/**
- * Koliko unapred sync-ujemo notifikacije na uređaju.
- * Realno: 48h je dovoljno (danas + sutra), a i ne spamuje sistem.
- */
-const SYNC_WINDOW_HOURS = 48;
+type ReminderCategory =
+  | "doctor"
+  | "vitamin"
+  | "feeding"
+  | "feeding_prep"
+  | "general";
 
-/**
- * Učita upcoming occurrences za porodicu.
- * Default: sledećih 7 dana (da UI ima dovoljno).
- */
+type OccurrenceStatus = "scheduled" | "done" | "cancelled";
+
+async function requireUserId(): Promise<string> {
+  const { data, error } = await supabase.auth.getUser();
+  if (error) throw error;
+  const uid = data.user?.id;
+  if (!uid) throw new Error("Niste prijavljeni.");
+  return uid;
+}
+
+function daysBetween(aIso?: string | null, b = new Date()) {
+  if (!aIso) return null;
+  const a = new Date(aIso);
+  if (Number.isNaN(a.getTime())) return null;
+  return Math.floor((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+function recommendedIntervalMinutes(birthDateIso?: string | null): number {
+  const days = daysBetween(birthDateIso);
+  if (days == null) return 165;
+  if (days <= 30) return 150;
+  if (days <= 90) return 180;
+  if (days <= 180) return 210;
+  return 240;
+}
+
 export async function listUpcomingOccurrences(
-  familyId: string,
-  daysAhead: number = 7
+  familyId: string
 ): Promise<ReminderOccurrence[]> {
-  const now = new Date();
-  const until = new Date(now.getTime() + daysAhead * 24 * 60 * 60 * 1000);
-
   const { data, error } = await supabase
     .from("reminder_occurrences")
     .select("*")
     .eq("family_id", familyId)
-    .gte("scheduled_for", now.toISOString())
-    .lte("scheduled_for", until.toISOString())
     .order("scheduled_for", { ascending: true });
 
   if (error) throw error;
-  return (data ?? []) as ReminderOccurrence[];
+  return data ?? [];
 }
 
-/**
- * Mark as done za occurrence.
- */
-export async function markOccurrenceDone(occurrenceId: string): Promise<void> {
+export async function markOccurrenceDone(id: string) {
+  const uid = await requireUserId();
+
   const { error } = await supabase
     .from("reminder_occurrences")
-    .update({ status: "done" })
-    .eq("id", occurrenceId);
+    .update({ status: "done", done_at: new Date().toISOString(), done_by: uid })
+    .eq("id", id);
 
   if (error) throw error;
 }
 
 /**
- * Jednokratni reminder (doktor, lek, vitamin itd.)
+ * Jednokratni reminder (npr. doktor)
  */
 export async function createOneOffReminder(
   familyId: string,
   babyId: string | null,
   title: string,
   whenIso: string,
-  category: string
-): Promise<void> {
-  const payload = {
+  category: ReminderCategory = "general"
+) {
+  const uid = await requireUserId();
+
+  const { error } = await supabase.from("reminder_occurrences").insert({
     family_id: familyId,
     baby_id: babyId,
     title: title.trim(),
     category,
     scheduled_for: whenIso,
-    status: "scheduled",
-  };
+    status: "scheduled" as OccurrenceStatus,
+    created_by: uid,
+    data: {},
+  });
 
-  const { error } = await supabase.from("reminder_occurrences").insert(payload);
   if (error) throw error;
 }
 
 /**
- * Daily vitamin helper (MVP): kreira 14 occurrences u nizu na zadato vreme.
- * Napomena: Ovo je MVP bez definicije; kasnije možemo ubaciti reminder_definitions.
+ * Daily vitamin: napravi definiciju + occurrences za narednih N dana.
+ * (pošto si ti ovo već koristio u /podsetnici page)
  */
 export async function createDailyVitaminDefinitionAndOccurrences(
   familyId: string,
   babyId: string | null,
   title: string,
   timeHHmm: string,
-  countDays: number = 14,
-  category: string = "vitamin"
-): Promise<void> {
-  const now = new Date();
-  const [hh, mm] = timeHHmm.split(":").map((x) => parseInt(x, 10));
-  const safeH = Number.isFinite(hh) ? hh : 18;
-  const safeM = Number.isFinite(mm) ? mm : 0;
+  days = 14
+) {
+  const uid = await requireUserId();
 
-  const rows = Array.from({ length: countDays }).map((_, i) => {
-    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i, safeH, safeM, 0, 0);
-    return {
+  const [hh, mm] = timeHHmm.split(":").map((x) => parseInt(x, 10));
+  const now = new Date();
+
+  // definicija (optional)
+  const { data: def, error: defErr } = await supabase
+    .from("reminder_definitions")
+    .insert({
       family_id: familyId,
       baby_id: babyId,
       title: title.trim(),
-      category,
+      category: "vitamin",
+      created_by: uid,
+      data: { time: timeHHmm },
+    })
+    .select("*")
+    .single();
+
+  if (defErr) throw defErr;
+
+  const occurrences = Array.from({ length: days }).map((_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i, hh || 0, mm || 0, 0);
+    return {
+      family_id: familyId,
+      baby_id: babyId,
+      definition_id: def?.id ?? null,
+      title: title.trim(),
+      category: "vitamin",
       scheduled_for: d.toISOString(),
-      status: "scheduled",
+      status: "scheduled" as OccurrenceStatus,
+      created_by: uid,
+      data: { kind: "vitamin_daily" },
     };
   });
 
-  const { error } = await supabase.from("reminder_occurrences").insert(rows);
+  const { error } = await supabase.from("reminder_occurrences").insert(occurrences);
   if (error) throw error;
 }
 
 /**
- * ✅ Global sync helper:
- * - uzme occurrences iz baze za sledećih X sati
- * - na Androidu (Capacitor) zakazuje lokalne notifikacije
+ * ✅ Core: posle hranjenja kreiramo:
+ * - feeding_prep: interval-15min
+ * - feeding: interval
  *
- * Ako nije native runtime → samo silently skip (da web ne puca).
+ * Interval uzimamo iz babies:
+ * - use_recommended_interval = true -> preporuka po uzrastu
+ * - false -> feeding_interval_minutes (custom)
  */
-export async function syncNativeNotificationsForFamily(familyId: string): Promise<void> {
-  try {
-    const now = new Date();
-    const until = new Date(now.getTime() + SYNC_WINDOW_HOURS * 60 * 60 * 1000);
-
-    const { data, error } = await supabase
-      .from("reminder_occurrences")
-      .select("id, title, category, scheduled_for, status")
-      .eq("family_id", familyId)
-      .gte("scheduled_for", now.toISOString())
-      .lte("scheduled_for", until.toISOString())
-      .order("scheduled_for", { ascending: true });
-
-    if (error) throw error;
-
-    const upcoming = (data ?? [])
-      .filter((x: any) => x.status !== "done")
-      .map((x: any) => ({
-        id: x.id as string,
-        title: x.title as string,
-        category: x.category as string,
-        scheduled_for: x.scheduled_for as string,
-      }));
-
-    // Dynamic import da web build ne poludi ako nema Capacitor-a
-    const mod = await import("@/lib/native/remindersSync").catch(() => null);
-    if (!mod?.syncRemindersToLocalNotifications) return;
-
-    await mod.syncRemindersToLocalNotifications(upcoming);
-  } catch {
-    // silent fail by design
-  }
-}
-
-/**
- * Helper koji koristi feeding flow:
- * napravi reminder occurrence za sledeće hranjenje (+2h45m).
- */
-export async function createNextFeedingReminder(
+export async function createFeedingPrepAndDueReminders(
   familyId: string,
   babyId: string,
-  minutesFromNow: number = 165 // 2h45m
-): Promise<void> {
-  const when = new Date(Date.now() + minutesFromNow * 60 * 1000).toISOString();
-  const title = "Sledeće hranjenje";
-  const category = "feeding";
+  occurredAtIso: string
+) {
+  const uid = await requireUserId();
 
-  const { error } = await supabase.from("reminder_occurrences").insert({
-    family_id: familyId,
-    baby_id: babyId,
-    title,
-    category,
-    scheduled_for: when,
-    status: "scheduled",
-  });
+  // fetch baby config
+  const { data: baby, error: babyErr } = await supabase
+    .from("babies")
+    .select("id,birth_date,use_recommended_interval,feeding_interval_minutes")
+    .eq("id", babyId)
+    .single();
+
+  if (babyErr) throw babyErr;
+
+  const useRec = baby?.use_recommended_interval !== false;
+  const custom = typeof baby?.feeding_interval_minutes === "number" ? baby.feeding_interval_minutes : null;
+
+  const intervalMin = useRec ? recommendedIntervalMinutes(baby?.birth_date ?? null) : (custom ?? 165);
+  const prepMin = Math.max(0, intervalMin - 15);
+
+  // clear future scheduled feeding reminders for this baby
+  const nowIso = new Date().toISOString();
+  await supabase
+    .from("reminder_occurrences")
+    .delete()
+    .eq("family_id", familyId)
+    .eq("baby_id", babyId)
+    .in("category", ["feeding", "feeding_prep"])
+    .eq("status", "scheduled")
+    .gte("scheduled_for", nowIso);
+
+  const base = new Date(occurredAtIso).getTime();
+  const prepAt = new Date(base + prepMin * 60 * 1000).toISOString();
+  const dueAt = new Date(base + intervalMin * 60 * 1000).toISOString();
+
+  const learnMoreUrl =
+    useRec
+      ? "https://www.healthychildren.org/English/ages-stages/baby/feeding-nutrition/Pages/how-often-and-how-much-should-your-baby-eat.aspx"
+      : null;
+
+  const { error } = await supabase.from("reminder_occurrences").insert([
+    {
+      family_id: familyId,
+      baby_id: babyId,
+      title: "Pripremi obrok",
+      category: "feeding_prep",
+      scheduled_for: prepAt,
+      status: "scheduled" as OccurrenceStatus,
+      created_by: uid,
+      data: {
+        kind: "feeding_prep",
+        interval_minutes: intervalMin,
+        prep_minutes: prepMin,
+        source: useRec ? "recommended" : "custom",
+        learn_more_url: learnMoreUrl,
+      },
+    },
+    {
+      family_id: familyId,
+      baby_id: babyId,
+      title: "Sledeće hranjenje",
+      category: "feeding",
+      scheduled_for: dueAt,
+      status: "scheduled" as OccurrenceStatus,
+      created_by: uid,
+      data: {
+        kind: "feeding_due",
+        interval_minutes: intervalMin,
+        source: useRec ? "recommended" : "custom",
+        learn_more_url: learnMoreUrl,
+      },
+    },
+  ]);
 
   if (error) throw error;
+}
+
+/**
+ * ✅ Native sync: uzmi occurrences za narednih 24h i zakaži notifikacije.
+ * (web = no-op)
+ */
+export async function syncNativeNotificationsForFamily(familyId: string) {
+  const now = new Date();
+  const end = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+
+  const { data, error } = await supabase
+    .from("reminder_occurrences")
+    .select("id,title,category,scheduled_for,status")
+    .eq("family_id", familyId)
+    .eq("status", "scheduled")
+    .gte("scheduled_for", now.toISOString())
+    .lte("scheduled_for", end.toISOString())
+    .order("scheduled_for", { ascending: true });
+
+  if (error) throw error;
+
+  const reminders = (data ?? []).map((r) => ({
+    id: r.id,
+    title: r.title,
+    category: r.category,
+    scheduled_for: r.scheduled_for,
+  }));
+
+  await syncRemindersToLocalNotifications(reminders);
 }
