@@ -162,8 +162,13 @@ export function FeedingModal({
       />
 
       {/* sheet */}
-      <div className="absolute inset-x-0 bottom-0 pb-24">
-        <div className="mx-auto max-w-md rounded-t-3xl bg-white p-4 shadow-2xl dark:bg-gray-950 max-h-[75vh] overflow-y-auto">
+      <div
+  className="absolute inset-x-0"
+  style={{
+    bottom: "calc(env(safe-area-inset-bottom) + 84px)", // 84px ~ tab bar
+  }}
+>
+  <div className="mx-auto max-w-md rounded-t-3xl bg-white p-4 shadow-2xl dark:bg-gray-950 max-h-[70vh] overflow-y-auto">
           <div className="flex items-center justify-between">
             <div className="text-base font-extrabold">Hranjenje</div>
             <button
