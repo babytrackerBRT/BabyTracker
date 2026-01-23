@@ -380,7 +380,8 @@ export default function RemindersPage() {
             </div>
             <div className="mt-2 grid grid-cols-2 gap-2">
               <Input value={vitTitle} onChange={(e) => setVitTitle(e.target.value)} />
-              <Input value={vitTime} onChange={(e) => setVitTime(e.target.value)} placeholder="18:00" />
+              <Input value={vitTime} onChange={(e) => setVitTime(e.target.value)} type="time" />
+
             </div>
             <Button className="mt-2 w-full" onClick={addDailyVitamin}>
               Dodaj daily vitamin
