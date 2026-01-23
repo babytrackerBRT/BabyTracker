@@ -118,7 +118,6 @@ export function SleepModal({
 
   return (
     <div className="fixed inset-0 z-50">
-      {/* backdrop */}
       <button
         className="absolute inset-0 bg-black/40"
         aria-label="Zatvori"
@@ -126,9 +125,12 @@ export function SleepModal({
         type="button"
       />
 
-      {/* sheet */}
-      <div className="absolute inset-x-0 bottom-0 pb-24">
-        <div className="mx-auto max-w-md rounded-t-3xl bg-white p-4 shadow-2xl dark:bg-gray-950 max-h-[75vh] overflow-y-auto">
+      {/* ✅ podignuto iznad bottom tabs + safe-area */}
+      <div
+        className="absolute inset-x-0"
+        style={{ bottom: "calc(env(safe-area-inset-bottom) + 84px)" }}
+      >
+        <div className="mx-auto max-w-md rounded-t-3xl bg-white p-4 shadow-2xl dark:bg-gray-950 max-h-[72vh] overflow-y-auto">
           <div className="flex items-center justify-between">
             <div className="text-base font-extrabold">Spavanje</div>
             <button
@@ -140,7 +142,6 @@ export function SleepModal({
             </button>
           </div>
 
-          {/* baby picker */}
           <div className="mt-3">
             <div className="text-xs font-semibold text-gray-500">Beba</div>
             <div className="mt-2 flex flex-wrap gap-2">
@@ -152,7 +153,6 @@ export function SleepModal({
             </div>
           </div>
 
-          {/* status */}
           <div className="mt-4">
             <div className="text-xs font-semibold text-gray-500">Status</div>
             <Card className="mt-2">
@@ -160,7 +160,11 @@ export function SleepModal({
                 <div className="space-y-1">
                   <div className="text-sm font-semibold">Spava</div>
                   <div className="text-xs text-gray-500">
-                    Počelo: {new Date(active.started_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    Počelo:{" "}
+                    {new Date(active.started_at).toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
                     {" • "}
                     Traje: {durationLabel}
                   </div>
@@ -171,7 +175,6 @@ export function SleepModal({
             </Card>
           </div>
 
-          {/* actions */}
           {!active ? (
             <div className="mt-4 grid grid-cols-2 gap-2">
               <Button variant="secondary" onClick={onClose}>
@@ -244,12 +247,6 @@ export function SleepModal({
                 </Button>
               </div>
             </>
-          )}
-
-          {err && !active && (
-            <div className="mt-3 rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-200">
-              {err}
-            </div>
           )}
         </div>
       </div>
