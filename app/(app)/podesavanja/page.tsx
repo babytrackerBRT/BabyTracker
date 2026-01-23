@@ -20,12 +20,66 @@ import { supabase } from "@/lib/supabase/client";
 import { testVibrateNotification } from "@/lib/native/testNotification";
 
 type ThemePref = "light" | "dark";
+type IntervalMode = "recommended" | "custom";
 
 function applyTheme(theme: ThemePref) {
   const root = document.documentElement;
   if (theme === "dark") root.classList.add("dark");
   else root.classList.remove("dark");
 }
+
+// --- Feeding interval helpers (UI only) ---
+function daysBetween(aIso?: string | null, b = new Date()) {
+  if (!aIso) return null;
+  const a = new Date(aIso);
+  if (Number.isNaN(a.getTime())) return null;
+  const diff = b.getTime() - a.getTime();
+  return Math.floor(diff / (1000 * 60 * 60 * 24));
+}
+
+/**
+ * Ovo su “heads-up” vrednosti (informativno), ne medicinski nalog.
+ * Poenta: roditelj bira, a mi nudimo logičan default.
+ */
+function recommendedIntervalMinutes(birthDateIso?: string | null): number {
+  const days = daysBetween(birthDateIso);
+  // fallback ako nema rođendana → 165min kao tvoj default
+  if (days == null) return 165;
+
+  // 0-30 dana: tipično ~2-3h
+  if (days <= 30) return 150;
+  // 1-3 meseca: često 2-4h
+  if (days <= 90) return 180;
+  // 3-6 meseci: 3-4h
+  if (days <= 180) return 210;
+  // 6+ meseci: češće ide 3-5h (plus čvrsta hrana), daj 240 kao miran default
+  return 240;
+}
+
+function recommendationLabel(birthDateIso?: string | null) {
+  const days = daysBetween(birthDateIso);
+  if (days == null) return "Preporuka (opšti default)";
+  if (days <= 30) return "0–1 mesec";
+  if (days <= 90) return "1–3 meseca";
+  if (days <= 180) return "3–6 meseci";
+  return "6+ meseci";
+}
+
+// Linkovi ka stručnim tekstovima (klik → otvori u browseru)
+const FEEDING_SOURCES = [
+  {
+    label: "AAP (HealthyChildren) – koliko često beba jede",
+    url: "https://www.healthychildren.org/English/ages-stages/baby/feeding-nutrition/Pages/how-often-and-how-much-should-your-baby-eat.aspx",
+  },
+  {
+    label: "Mayo Clinic – newborn feeding tips",
+    url: "https://www.mayoclinic.org/healthy-lifestyle/infant-and-toddler-health/in-depth/healthy-baby/art-20047741",
+  },
+  {
+    label: "NHS – feeding your newborn baby",
+    url: "https://www.nhs.uk/best-start-in-life/baby/baby-basics/caring-for-your-baby/feeding-your-newborn-baby/",
+  },
+];
 
 export default function SettingsPage() {
   const [familyId, setFamilyId] = useState("");
@@ -40,6 +94,10 @@ export default function SettingsPage() {
   const [inviteEmail, setInviteEmail] = useState("");
 
   const [theme, setTheme] = useState<ThemePref>("light");
+
+  // feeding interval settings
+  const [intervalMode, setIntervalMode] = useState<IntervalMode>("recommended");
+  const [customMinutes, setCustomMinutes] = useState<number>(165);
 
   const selectedBaby = useMemo(
     () => babies.find((b) => b.id === selected) ?? null,
@@ -61,6 +119,19 @@ export default function SettingsPage() {
       const sb = b.find((x) => x.id === sel);
       setName(sb?.name ?? "");
       setBirth(sb?.birth_date ?? "");
+
+      // --- load interval settings from DB fields ---
+      const useRec = (sb as any)?.use_recommended_interval;
+      const custom = (sb as any)?.feeding_interval_minutes;
+
+      if (useRec === false) setIntervalMode("custom");
+      else setIntervalMode("recommended");
+
+      if (typeof custom === "number" && Number.isFinite(custom)) {
+        setCustomMinutes(custom);
+      } else {
+        setCustomMinutes(165);
+      }
 
       const mem = await listFamilyMembers(fid);
       setMembers(mem);
@@ -87,9 +158,16 @@ export default function SettingsPage() {
 
     await updateBabyName(selectedBaby.id, name.trim() || "Beba");
 
+    const useRecommended = intervalMode === "recommended";
+    const custom = intervalMode === "custom" ? customMinutes : null;
+
     const { error } = await supabase
       .from("babies")
-      .update({ birth_date: birth || null })
+      .update({
+        birth_date: birth || null,
+        use_recommended_interval: useRecommended,
+        feeding_interval_minutes: custom,
+      })
       .eq("id", selectedBaby.id);
 
     if (error) throw error;
@@ -135,8 +213,9 @@ export default function SettingsPage() {
     if (!ok) return;
 
     await supabase.auth.signOut();
-    // posle signOut-a app će sama prebaciti na login preko auth guard-a
   }
+
+  const recommendedMin = recommendedIntervalMinutes(birth || null);
 
   return (
     <div className="space-y-4">
@@ -169,6 +248,15 @@ export default function SettingsPage() {
                 setSelected(b.id);
                 setName(b.name);
                 setBirth(b.birth_date ?? "");
+
+                const useRec = (b as any)?.use_recommended_interval;
+                const custom = (b as any)?.feeding_interval_minutes;
+
+                if (useRec === false) setIntervalMode("custom");
+                else setIntervalMode("recommended");
+
+                if (typeof custom === "number" && Number.isFinite(custom)) setCustomMinutes(custom);
+                else setCustomMinutes(165);
               }}
             >
               {b.name}
@@ -187,16 +275,86 @@ export default function SettingsPage() {
         </div>
 
         {selectedBaby && (
-          <div className="rounded-2xl border border-gray-200 p-3 dark:border-gray-800 space-y-2">
+          <div className="rounded-2xl border border-gray-200 p-3 dark:border-gray-800 space-y-3">
             <div className="text-xs font-semibold text-gray-500">Podešavanja bebe</div>
+
             <div>
               <label className="text-sm font-semibold">Ime</label>
               <Input value={name} onChange={(e) => setName(e.target.value)} />
             </div>
+
             <div>
               <label className="text-sm font-semibold">Datum rođenja</label>
               <Input value={birth} onChange={(e) => setBirth(e.target.value)} type="date" />
+              <div className="mt-1 text-xs text-gray-500">
+                Koristi se samo za “heads-up” preporuku intervala hranjenja.
+              </div>
             </div>
+
+            {/* ✅ Feeding interval */}
+            <div className="rounded-2xl border border-gray-200 p-3 dark:border-gray-800 space-y-2">
+              <div className="text-sm font-extrabold">Interval hranjenja</div>
+              <div className="text-xs text-gray-500">
+                Ovo je informativna preporuka + tvoj izbor. Ako pedijatar kaže drugačije – prati pedijatra.
+              </div>
+
+              <div className="flex gap-2">
+                <Button
+                  variant={intervalMode === "recommended" ? "primary" : "secondary"}
+                  onClick={() => setIntervalMode("recommended")}
+                  className="flex-1"
+                >
+                  Preporučeno
+                </Button>
+                <Button
+                  variant={intervalMode === "custom" ? "primary" : "secondary"}
+                  onClick={() => setIntervalMode("custom")}
+                  className="flex-1"
+                >
+                  Custom
+                </Button>
+              </div>
+
+              {intervalMode === "recommended" ? (
+                <Card>
+                  <div className="text-sm font-semibold">
+                    {recommendationLabel(birth || null)} • ~{Math.round(recommendedMin / 60)}h
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    Default: {recommendedMin} min (možeš preći na Custom kad god hoćeš).
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {FEEDING_SOURCES.map((s) => (
+                      <a
+                        key={s.url}
+                        href={s.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-sm font-semibold text-brand-700"
+                      >
+                        Prikaži više
+                      </a>
+                    ))}
+                  </div>
+                </Card>
+              ) : (
+                <Card className="space-y-2">
+                  <div className="text-xs font-semibold text-gray-500">Custom interval (min)</div>
+                  <div className="flex flex-wrap gap-2">
+                    {[120, 150, 165, 180, 210, 240, 270, 300].map((m) => (
+                      <Chip key={m} active={customMinutes === m} onClick={() => setCustomMinutes(m)}>
+                        {m} min
+                      </Chip>
+                    ))}
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    Podsetnici posle hranjenja: “Pripremi obrok” = {Math.max(0, customMinutes - 15)} min,
+                    “Sledeće hranjenje” = {customMinutes} min.
+                  </div>
+                </Card>
+              )}
+            </div>
+
             <Button onClick={saveBaby} className="w-full">
               Sačuvaj
             </Button>
@@ -269,19 +427,12 @@ export default function SettingsPage() {
         </Button>
       </Card>
 
-      {/* ✅ Odjava na dnu, crveno + confirm */}
       <Card className="space-y-2">
         <div className="text-sm font-extrabold">Nalog</div>
-        <Button
-          onClick={logout}
-          className="w-full"
-          variant="secondary"
-        >
+        <Button onClick={logout} className="w-full" variant="secondary">
           <span className="text-red-600 font-extrabold">Odjava</span>
         </Button>
-        <div className="text-xs text-gray-500">
-          Da ne klikneš slučajno, traži se potvrda.
-        </div>
+        <div className="text-xs text-gray-500">Da ne klikneš slučajno, traži se potvrda.</div>
       </Card>
     </div>
   );
