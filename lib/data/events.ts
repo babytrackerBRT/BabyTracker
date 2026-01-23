@@ -94,4 +94,30 @@ export async function createDiaper(
   });
 
   if (error) throw error;
+
+}
+
+// deleteEvent
+
+  export async function deleteEvent(eventId: string) {
+  const { error } = await supabase
+    .from("events")
+    .delete()
+    .eq("id", eventId);
+
+  if (error) throw error;
+}
+
+// updateEvent
+
+export async function updateEvent(
+  eventId: string,
+  payload: Partial<EventRow>
+) {
+  const { error } = await supabase
+    .from("events")
+    .update(payload)
+    .eq("id", eventId);
+
+  if (error) throw error;
 }
