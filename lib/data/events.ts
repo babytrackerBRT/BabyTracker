@@ -1,7 +1,10 @@
 import { supabase } from "@/lib/supabase/client";
 import type { EventRow } from "@/types/db";
-import { scheduleFeedingReminders } from "@/lib/data/feedingReminders";
-import { syncNativeNotificationsForFamily } from "@/lib/native/notifications";
+
+import {
+  createNextFeedingReminder,
+  syncNativeNotificationsForFamily,
+} from "@/lib/data/reminders";
 
 async function requireUserId(): Promise<string> {
   const { data, error } = await supabase.auth.getUser();
@@ -9,39 +12,6 @@ async function requireUserId(): Promise<string> {
   const uid = data.user?.id;
   if (!uid) throw new Error("Niste prijavljeni. Molimo prijavite se ponovo.");
   return uid;
-}
-
-function calcRecommendedIntervalMinutes(birthDate: string | null): number {
-  if (!birthDate) return 180;
-  const dob = new Date(birthDate);
-  const now = new Date();
-  const diffMs = now.getTime() - dob.getTime();
-  const months = diffMs / (1000 * 60 * 60 * 24 * 30.44);
-
-  if (months < 2) return 180;
-  if (months < 4) return 210;
-  if (months < 6) return 240;
-  if (months < 9) return 270;
-  return 300;
-}
-
-async function getFeedingIntervalMinutesForBaby(babyId: string): Promise<number> {
-  const { data, error } = await supabase
-    .from("babies")
-    .select("birth_date,use_recommended_interval,feeding_interval_minutes")
-    .eq("id", babyId)
-    .single();
-
-  if (error) throw error;
-
-  if (data.use_recommended_interval) {
-    return calcRecommendedIntervalMinutes(data.birth_date ?? null);
-  }
-
-  const custom = Number(data.feeding_interval_minutes);
-  if (Number.isFinite(custom) && custom > 0) return custom;
-
-  return 180;
 }
 
 export async function listRecentEvents(familyId: string, limit = 20): Promise<EventRow[]> {
@@ -56,6 +26,12 @@ export async function listRecentEvents(familyId: string, limit = 20): Promise<Ev
   return data ?? [];
 }
 
+/**
+ * FEEDING
+ * - upis eventa
+ * - automatski kreira reminder occurrence za sledeće hranjenje (+2h45m)
+ * - radi native sync notifikacija (Android Capacitor) za SVE reminders
+ */
 export async function createFeeding(
   familyId: string,
   babyId: string,
@@ -84,19 +60,17 @@ export async function createFeeding(
 
   if (error) throw error;
 
-  // ✅ AUTO reminders posle hranjenja
-  const intervalMinutes = await getFeedingIntervalMinutesForBaby(babyId);
-  await scheduleFeedingReminders({
-    familyId,
-    babyId,
-    occurredAt,
-    intervalMinutes,
-  });
+  // ✅ 1) Kreiraj reminder za sledeće hranjenje (+2h45m)
+  // (koristi occurrence tabelu kao source of truth)
+  await createNextFeedingReminder(familyId, babyId, 165);
 
-  // ✅ ODMAH sync native notifikacija (za sve reminders)
+  // ✅ 2) Sync notifikacija za celu porodicu (za sve reminders)
   await syncNativeNotificationsForFamily(familyId);
 }
 
+/**
+ * DIAPER
+ */
 export async function createDiaper(
   familyId: string,
   babyId: string,
@@ -120,6 +94,4 @@ export async function createDiaper(
   });
 
   if (error) throw error;
-
-  // (Pelene trenutno ne generišu reminders, ali sync neće škoditi – no-op na webu)
 }
