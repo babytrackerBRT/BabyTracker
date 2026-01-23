@@ -5,7 +5,7 @@ import { BottomTabs } from "./BottomTabs";
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div
-      className="min-h-screen"
+      className="min-h-screen bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-50"
       style={{
         // ✅ gore ispod status bara (notch/clock)
         paddingTop: "env(safe-area-inset-top)",
