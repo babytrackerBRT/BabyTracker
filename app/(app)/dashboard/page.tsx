@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { Chip } from "@/components/ui/Chip";
 import { Button } from "@/components/ui/Button";
@@ -15,6 +15,30 @@ import { getActiveSleepSession, startSleepSession, stopSleepSession } from "@/li
 
 import type { Baby, EventRow, ReminderOccurrence } from "@/types/db";
 import { formatTime } from "@/lib/utils";
+
+function daysBetween(aIso?: string | null, b = new Date()) {
+  if (!aIso) return null;
+  const a = new Date(aIso);
+  if (Number.isNaN(a.getTime())) return null;
+  return Math.floor((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+function recommendedIntervalMinutes(birthDateIso?: string | null): number {
+  const days = daysBetween(birthDateIso);
+  if (days == null) return 165;
+  if (days <= 30) return 150;
+  if (days <= 90) return 180;
+  if (days <= 180) return 210;
+  return 240;
+}
+
+function minutesUntil(iso: string) {
+  const ms = new Date(iso).getTime() - Date.now();
+  return Math.max(0, Math.round(ms / 60000));
+}
+
+const AAP_LINK =
+  "https://www.healthychildren.org/English/ages-stages/baby/feeding-nutrition/Pages/how-often-and-how-much-should-your-baby-eat.aspx";
 
 export default function DashboardPage() {
   const [familyId, setFamilyId] = useState<string>("");
@@ -44,7 +68,7 @@ export default function DashboardPage() {
       setEvents(ev);
 
       const ro = await listUpcomingOccurrences(fid);
-      setReminders(ro.slice(0, 6));
+      setReminders(ro.slice(0, 10));
     } catch (e: any) {
       setErr(e?.message ?? "Greška");
     }
@@ -54,6 +78,11 @@ export default function DashboardPage() {
     load();
   }, []);
 
+  const activeBaby = useMemo(
+    () => babies.find((b) => b.id === babyId) ?? null,
+    [babies, babyId]
+  );
+
   const lastFeeding = events.find(
     (e) => e.type === "feeding" && (!babyId || e.baby_id === babyId)
   );
@@ -62,6 +91,61 @@ export default function DashboardPage() {
     (e) => e.type === "diaper" && (!babyId || e.baby_id === babyId)
   );
 
+  // interval (recommended/custom)
+  const intervalMin = useMemo(() => {
+    if (!activeBaby) return 165;
+
+    const useRec = (activeBaby as any)?.use_recommended_interval !== false;
+    const custom = (activeBaby as any)?.feeding_interval_minutes;
+    if (!useRec && typeof custom === "number" && Number.isFinite(custom)) return custom;
+
+    return recommendedIntervalMinutes(activeBaby.birth_date ?? null);
+  }, [activeBaby]);
+
+  const prepMin = Math.max(0, intervalMin - 15);
+
+  // ✅ categories that exist in your ReminderCategory union:
+  // feeding_due + feeding_prep (and older data might still say "feeding")
+  const nextPrep = useMemo(() => {
+    return reminders.find((r) => {
+      const cat = String((r as any).category);
+      return (
+        r.status === "scheduled" &&
+        (cat === "feeding_prep") &&
+        (!babyId || r.baby_id === babyId)
+      );
+    });
+  }, [reminders, babyId]);
+
+  const nextDue = useMemo(() => {
+    return reminders.find((r) => {
+      const cat = String((r as any).category);
+      return (
+        r.status === "scheduled" &&
+        (cat === "feeding_due" || cat === "feeding") &&
+        (!babyId || r.baby_id === babyId)
+      );
+    });
+  }, [reminders, babyId]);
+
+  const derivedPrepText = useMemo(() => {
+    if (nextPrep?.scheduled_for) return `${minutesUntil(nextPrep.scheduled_for)} min`;
+    if (lastFeeding?.occurred_at) {
+      const at = new Date(lastFeeding.occurred_at).getTime() + prepMin * 60 * 1000;
+      return `${Math.max(0, Math.round((at - Date.now()) / 60000))} min`;
+    }
+    return "—";
+  }, [nextPrep, lastFeeding, prepMin]);
+
+  const derivedDueText = useMemo(() => {
+    if (nextDue?.scheduled_for) return `${minutesUntil(nextDue.scheduled_for)} min`;
+    if (lastFeeding?.occurred_at) {
+      const at = new Date(lastFeeding.occurred_at).getTime() + intervalMin * 60 * 1000;
+      return `${Math.max(0, Math.round((at - Date.now()) / 60000))} min`;
+    }
+    return "—";
+  }, [nextDue, lastFeeding, intervalMin]);
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -69,8 +153,6 @@ export default function DashboardPage() {
           <div className="text-xs font-semibold text-gray-500">Pogo Baby Log</div>
           <h1 className="text-2xl font-extrabold">Početna</h1>
         </div>
-
-        {/* ✅ Odjava je prebačena u Podešavanja */}
       </div>
 
       {err && <Card className="border-red-200 bg-red-50 text-red-700">{err}</Card>}
@@ -87,6 +169,47 @@ export default function DashboardPage() {
           </div>
         )}
       </div>
+
+      {/* HEADS-UP */}
+      <Card className="space-y-2">
+        <div className="flex items-center justify-between">
+          <div className="text-sm font-extrabold">Heads-up (hranjenje)</div>
+          <a className="text-sm font-semibold text-brand-700" href={AAP_LINK} target="_blank" rel="noreferrer">
+            Prikaži više
+          </a>
+        </div>
+
+        <div className="text-sm text-gray-600">
+          Interval: <span className="font-semibold">{intervalMin} min</span>{" "}
+          {activeBaby && (activeBaby as any)?.use_recommended_interval !== false ? (
+            <span className="text-xs text-gray-500">(preporučeno)</span>
+          ) : (
+            <span className="text-xs text-gray-500">(custom)</span>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <div className="rounded-xl border border-gray-200 px-3 py-2 text-sm dark:border-gray-800">
+            <div className="text-xs font-semibold text-gray-500">Pripremi obrok</div>
+            <div className="mt-1 text-base font-extrabold">{derivedPrepText}</div>
+            {nextPrep?.scheduled_for && (
+              <div className="text-xs text-gray-500">{formatTime(nextPrep.scheduled_for)}</div>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-gray-200 px-3 py-2 text-sm dark:border-gray-800">
+            <div className="text-xs font-semibold text-gray-500">Sledeće hranjenje</div>
+            <div className="mt-1 text-base font-extrabold">{derivedDueText}</div>
+            {nextDue?.scheduled_for && (
+              <div className="text-xs text-gray-500">{formatTime(nextDue.scheduled_for)}</div>
+            )}
+          </div>
+        </div>
+
+        <div className="text-xs text-gray-500">
+          Ovo je informativno. Ako pedijatar preporuči drugačije, prati pedijatra.
+        </div>
+      </Card>
 
       <div className="grid grid-cols-2 gap-3">
         <Card>
@@ -131,7 +254,7 @@ export default function DashboardPage() {
         </div>
 
         <div className="mt-2 text-xs text-gray-500">
-          Sledeći korak: Dnevnik (timeline) + edit/delete.
+          Sledeći korak: reminders kartice (boje) + feeding modal heads-up.
         </div>
       </Card>
 
@@ -148,7 +271,7 @@ export default function DashboardPage() {
 
         <div className="mt-3 space-y-2">
           {reminders.length ? (
-            reminders.map((r) => (
+            reminders.slice(0, 6).map((r) => (
               <div
                 key={r.id}
                 className="flex items-center justify-between rounded-xl border border-gray-200 px-3 py-2 text-sm dark:border-gray-800"
@@ -156,7 +279,7 @@ export default function DashboardPage() {
                 <div className="min-w-0">
                   <div className="truncate font-semibold">{r.title}</div>
                   <div className="text-xs text-gray-500">
-                    {formatTime(r.scheduled_for)} • {r.category}
+                    {formatTime(r.scheduled_for)} • {String((r as any).category)}
                   </div>
                 </div>
                 <div className="text-xs font-semibold text-gray-500">{r.status}</div>
